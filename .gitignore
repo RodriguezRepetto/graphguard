@@ -1,0 +1,21 @@
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+
+# Test artifacts
+.pytest_cache/
+
+# OS files
+.DS_Store
+
+# GraphGuard output files
+report.json
+report.html
+
+# Environment variables
+.env

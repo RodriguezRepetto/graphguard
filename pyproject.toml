@@ -1,0 +1,31 @@
+[project]
+name = "graphguard"
+version = "0.1.0"
+description = "Security linter for LangGraph agent pipelines"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=1.2.6",        # agent orchestration framework
+    "langchain-openai>=0.3.0", # OpenAI-compatible client for llama-server
+    "typer>=0.12.0",           # CLI framework
+    "rich>=13.0.0",            # colored terminal output
+    "httpx>=0.27.0",           # HTTP client to reach llama-server
+    "pydantic>=2.0.0",         # data validation for findings schema
+]
+
+[project.scripts]
+graphguard = "main:app"        # maps `graphguard` CLI command to main.py app object
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["graphguard"]      # tells hatch which package to include in the wheel
+
+[tool.pytest.ini_options]
+testpaths = ["graphguard/tests"]   # default test directory for pytest
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",               # test runner
+]
