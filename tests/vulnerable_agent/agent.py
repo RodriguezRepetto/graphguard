@@ -8,13 +8,23 @@ Vulnerabilities present:
   [ASI01] Prompt injection — user input passed directly to LLM
   [ASI02] Tool misuse — SQL tool with no input validation
   [ASI03] State leakage — sensitive fields exposed to all nodes
+  [ASI05] Supply chain — pinned dependency below known-vulnerable threshold
   [ASI06] Privilege escalation — admin tool accessible without scope check
   [ASI07] Inter-node validation — raw LLM output passed to next node
+  [ASI08] Memory poisoning — checkpointer persists unvalidated LLM output
 """
 
 import os
-from typing import TypedDict, Annotated
+from typing import TypedDict
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+
+
+# --- VULNERABILITY ASI05: supply chain — outdated dependency with known CVE ---
+# Pinning langchain-community to a version below 0.3.0 exposes this agent to
+# CVE-2026-28277: unsafe msgpack deserialization enabling Remote Code Execution.
+# Detected by GraphGuard's supply chain checker via installed package version.
+REQUIREMENTS = ["langchain-community==0.2.5", "langgraph==1.1.9"]
 
 
 # --- VULNERABILITY ASI03: sensitive fields in state visible to all nodes ---
@@ -80,6 +90,14 @@ def sql_executor_node(state: AgentState) -> dict:
     return {"response": result}
 
 
+# --- VULNERABILITY ASI08: checkpointer persists raw LLM output without validation ---
+# The MemorySaver checkpointer writes the full agent state — including the
+# unvalidated llm_output field — to persistent memory after each step.
+# An attacker who can influence llm_output can poison the checkpoint store,
+# corrupting future agent executions that load this state from memory.
+memory = MemorySaver()
+
+
 # --- graph definition ---
 def build_agent():
     """Builds the vulnerable agent graph."""
@@ -95,7 +113,8 @@ def build_agent():
     graph.add_edge("query_handler", "sql_executor")
     graph.add_edge("sql_executor",  END)
 
-    return graph.compile()
+    # INSECURE: checkpointer persists unvalidated state to memory (ASI08)
+    return graph.compile(checkpointer=memory)
 
 
 agent = build_agent()

@@ -110,7 +110,7 @@ def render_console_output(findings: list[Finding], summary: dict) -> None:
 
         # remediation — split by newline for step-by-step display
         console.print(f"  [bold green]Fix:[/bold green]")
-        for line in finding.remediation.split("\\n"):
+        for line in finding.remediation.split("\n"):
             line = line.strip()
             if line:
                 console.print(f"    [green]{line}[/green]")

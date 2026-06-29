@@ -6,16 +6,24 @@ and detects security vulnerabilities across seven OWASP ASI vectors.
 The LLM reasons over the full parsed structure — no hardcoded rules.
 """
 
-import json                          # for serializing AST data into the prompt
-import httpx                         # for calling llama-server HTTP API
+import json
+import httpx
 from graphguard.state import GraphGuardState, Finding, Severity
 
 
-# llama-server endpoint — must be running before scan
-LLAMA_SERVER_URL = "http://127.0.0.1:8080/v1/chat/completions"
-
-# model identifier sent to llama-server
-MODEL_NAME = "qwen3.5-9b"
+# Model endpoint configuration — selected by the --model CLI flag.
+# fast:      Qwen3.5-9B  on port 8080 — default, good for most scans
+# reasoning: Qwen3.5-35B-A3B on port 8081 — slower but deeper analysis
+LLAMA_ENDPOINTS = {
+    "fast": {
+        "url":   "http://127.0.0.1:8080/v1/chat/completions",
+        "model": "qwen3.5-9b",
+    },
+    "reasoning": {
+        "url":   "http://127.0.0.1:8081/v1/chat/completions",
+        "model": "qwen3.5-35b-a3b",
+    },
+}
 
 # system prompt that tells the LLM what to look for
 SYSTEM_PROMPT = """You are GraphGuard, an expert security auditor for LangGraph agent pipelines.
@@ -56,43 +64,33 @@ def build_prompt(parsed_ast: dict) -> str:
     Converts the parsed AST dict into a prompt string for the LLM.
     Serializes the structure as JSON and includes it in the user message.
     """
-
-    # serialize the parsed AST — this is what the LLM will reason over
     ast_json = json.dumps(parsed_ast, indent=2)
-
-    # truncate if too large to fit in context window (safety measure)
     if len(ast_json) > 12000:
         ast_json = ast_json[:12000] + "\n... [truncated for context window]"
-
     return f"Analyze this LangGraph agent for security vulnerabilities:\n\n{ast_json}"
 
 
-def call_llm(prompt: str) -> str:
+def call_llm(prompt: str, endpoint: dict) -> str:
     """
     Sends the prompt to llama-server and returns the raw text response.
     Uses the OpenAI-compatible /v1/chat/completions endpoint.
     """
-
-    # build the request payload for llama-server
     payload = {
-        "model":      MODEL_NAME,     # model loaded in llama-server
+        "model":    endpoint["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},   # security context
-            {"role": "user",   "content": prompt},           # AST data
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": prompt},
         ],
-        "temperature": 0.1,           # low temperature for deterministic analysis
-        "max_tokens":  2048,          # enough for a full findings list
+        "temperature": 0.1,
+        "max_tokens":  2048,
     }
 
-    # send request to llama-server — timeout 120s for large agents
     response = httpx.post(
-        LLAMA_SERVER_URL,
+        endpoint["url"],
         json=payload,
         timeout=120.0,
     )
-    response.raise_for_status()       # raise if server returned an error
-
-    # extract the text content from the response
+    response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
 
@@ -101,47 +99,40 @@ def parse_llm_response(raw: str, finding_counter: list) -> list[Finding]:
     Parses the LLM JSON response into a list of Finding objects.
     Handles malformed responses gracefully including Qwen3 thinking mode.
     """
-
     findings = []
-
-    # start with the raw response stripped of whitespace
     clean = raw.strip()
 
     # strip thinking mode output — Qwen3 adds <think>...</think> before responding
     if "<think>" in clean and "</think>" in clean:
-        clean = clean.split("</think>")[-1].strip()  # take only what's after thinking
+        clean = clean.split("</think>")[-1].strip()
 
     # strip any accidental markdown fences the LLM might add
     if "```" in clean:
-        # extract content between first and last fence
         parts = clean.split("```")
         for part in parts:
             part = part.strip()
             if part.startswith("json"):
-                part = part[4:].strip()  # remove language tag
+                part = part[4:].strip()
             if part.startswith("[") or part.startswith("{"):
-                clean = part             # found the JSON block
+                clean = part
                 break
 
     # find the JSON array even if there's text before or after it
-    start = clean.find("[")             # find opening bracket
-    end   = clean.rfind("]")           # find last closing bracket
+    start = clean.find("[")
+    end   = clean.rfind("]")
     if start != -1 and end != -1:
-        clean = clean[start:end+1]      # extract just the JSON array
+        clean = clean[start:end+1]
 
     # attempt to parse as JSON array
     try:
         items = json.loads(clean.strip())
     except json.JSONDecodeError:
-       # response could not be parsed — skip silently and return empty list
-       print(f"[analyzer] warning: could not parse LLM response as JSON")
-
-    return []
+        print(f"[analyzer] warning: could not parse LLM response as JSON")
+        return []   # only reached on parse failure
 
     # convert each dict into a Finding object
     for item in items:
         try:
-            # auto-generate sequential ID
             finding_counter[0] += 1
             item["id"] = f"GG-{finding_counter[0]:03d}"
 
@@ -157,7 +148,6 @@ def parse_llm_response(raw: str, finding_counter: list) -> list[Finding]:
             )
             findings.append(finding)
         except Exception as e:
-            # skip malformed findings without crashing
             print(f"[analyzer] warning: skipped malformed finding — {e}")
 
     return findings
@@ -168,14 +158,16 @@ def analyzer_node(state: GraphGuardState) -> dict:
     Node 2: sends parsed AST to local LLM and collects security findings.
     Iterates over each parsed file and runs the LLM analysis on each one.
     """
+    parsed_ast = state["parsed_ast"]
+    all_findings = []
+    finding_counter = [0]
 
-    parsed_ast = state["parsed_ast"]     # dict of filepath -> AST structures
-    all_findings = []                    # accumulates findings across all files
-    finding_counter = [0]                # mutable counter for sequential IDs
+    # select endpoint based on the model flag passed from the CLI
+    model_key = state.get("model", "fast")
+    endpoint  = LLAMA_ENDPOINTS.get(model_key, LLAMA_ENDPOINTS["fast"])
 
-    print(f"[analyzer] analyzing {len(parsed_ast)} files with LLM")
+    print(f"[analyzer] analyzing {len(parsed_ast)} files with LLM ({model_key} model)")
 
-    # analyze each file individually for focused results
     for filepath, ast_data in parsed_ast.items():
 
         # skip files with parse errors
@@ -189,26 +181,22 @@ def analyzer_node(state: GraphGuardState) -> dict:
 
         print(f"[analyzer] scanning {filepath}")
 
-        # build the prompt for this file
         prompt = build_prompt({filepath: ast_data})
 
-        # call the LLM and get raw response
         try:
-            raw_response = call_llm(prompt)
+            raw_response = call_llm(prompt, endpoint)
         except httpx.ConnectError:
-            # llama-server not running — fail gracefully
-            print(f"[analyzer] error: cannot reach llama-server at {LLAMA_SERVER_URL}")
+            print(f"[analyzer] error: cannot reach llama-server at {endpoint['url']}")
             print(f"[analyzer] hint: start llama-server before running graphguard")
             return {"findings": all_findings}
         except Exception as e:
             print(f"[analyzer] error calling LLM for {filepath}: {e}")
             continue
 
-        # parse LLM response into Finding objects
         findings = parse_llm_response(raw_response, finding_counter)
         print(f"[analyzer] {len(findings)} findings in {filepath}")
         all_findings.extend(findings)
 
     print(f"[analyzer] total findings: {len(all_findings)}")
 
-    return {"findings": all_findings}    # passed to scorer_node
+    return {"findings": all_findings}

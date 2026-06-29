@@ -39,7 +39,7 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/graphguard
+git clone https://github.com/RodriguezRepetto/graphguard
 cd graphguard
 uv pip install -e .
 ```

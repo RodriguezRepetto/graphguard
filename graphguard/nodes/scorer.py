@@ -30,8 +30,9 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
     seen = {}  # key: (file, line, owasp_id) -> Finding
 
     for finding in findings:
-        # build a deduplication key from location and vector
-        key = (finding.file, finding.line, finding.owasp_id)
+        # key on file + owasp_id + title so findings with line=None are not
+        # incorrectly merged when multiple distinct issues share the same vector
+        key = (finding.file, finding.owasp_id, finding.title)
 
         if key not in seen:
             # first time seeing this finding — store it

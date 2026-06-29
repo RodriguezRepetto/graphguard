@@ -45,3 +45,4 @@ class GraphGuardState(TypedDict):
     scored:        bool           # flag set to True after scorer_node runs
     report:        dict           # final structured report produced by reporter_node
     error:         Optional[str]  # any fatal error message, None if clean run
+    model:         str            # LLM model selection: "fast" or "reasoning"

@@ -6,12 +6,18 @@ and checks installed package versions against a database of known CVEs
 affecting the LangGraph/LangChain ecosystem.
 """
 
-import re                              # for parsing version strings
-import importlib.metadata              # for reading installed package versions
+import re
+import importlib.metadata
 
 
-# known CVEs affecting LangGraph/LangChain ecosystem
-# format: package -> list of {cve, affected_below, severity, description}
+# Known CVEs affecting LangGraph/LangChain ecosystem.
+#
+# NOTE: The CVE identifiers below are illustrative examples representing
+# the class of vulnerabilities found in these packages. They should be
+# verified against the NVD (https://nvd.nist.gov/) before use in production
+# security tooling or compliance reporting.
+#
+# Format: package -> list of {cve, affected_below, severity, description}
 KNOWN_CVES = {
     "langgraph-checkpoint-sqlite": [
         {
@@ -55,12 +61,16 @@ KNOWN_CVES = {
 def parse_version(version_str: str) -> tuple:
     """
     Converts a version string like '1.2.6' into a tuple (1, 2, 6)
-    for easy numeric comparison.
+    for easy numeric comparison. Always returns a 3-element tuple;
+    missing parts are padded with 0. Unparseable strings return (0, 0, 0).
     """
 
-    # extract only numeric parts — strip any pre-release suffixes
     parts = re.findall(r"\d+", version_str.split("+")[0])
-    return tuple(int(p) for p in parts[:3])  # take only major.minor.patch
+    if not parts:
+        return (0, 0, 0)
+    # pad to exactly 3 elements so (1, 2) and (1, 2, 0) compare as equal
+    padded = (parts + ["0", "0", "0"])[:3]
+    return tuple(int(p) for p in padded)
 
 
 def is_vulnerable(installed: str, affected_below: str) -> bool:
@@ -69,11 +79,11 @@ def is_vulnerable(installed: str, affected_below: str) -> bool:
     """
 
     try:
-        installed_tuple    = parse_version(installed)
-        affected_tuple     = parse_version(affected_below)
-        return installed_tuple < affected_tuple   # vulnerable if older
+        installed_tuple = parse_version(installed)
+        affected_tuple  = parse_version(affected_below)
+        return installed_tuple < affected_tuple
     except Exception:
-        return False  # if we can't parse, assume safe
+        return False
 
 
 def check_supply_chain() -> list[dict]:
@@ -86,14 +96,11 @@ def check_supply_chain() -> list[dict]:
 
     for package, cve_list in KNOWN_CVES.items():
 
-        # try to get the installed version of this package
         try:
             installed_version = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
-            # package not installed — skip
             continue
 
-        # check each CVE for this package
         for cve in cve_list:
             if is_vulnerable(installed_version, cve["affected_below"]):
                 vulnerabilities.append({

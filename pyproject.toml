@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-graphguard = "main:app"        # maps `graphguard` CLI command to main.py app object
+graphguard = "graphguard.cli:app"   # maps `graphguard` CLI command to graphguard/cli.py
 
 [build-system]
 requires = ["hatchling"]
