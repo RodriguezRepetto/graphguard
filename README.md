@@ -19,6 +19,7 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 ## Features
 
 - **LLM-driven analysis** — no hardcoded rules, reasoning over your actual code
+- **Multi-language support** — analyzes Python (`.py`), JavaScript (`.js`), and TypeScript (`.ts`) LangGraph agents via tree-sitter AST parsing
 - **7 OWASP ASI vectors** — prompt injection, tool misuse, state leakage, supply chain, privilege escalation, inter-node validation, memory poisoning
 - **Rich console output** — color-coded findings table with detailed remediations
 - **CI/CD ready** — `--strict` flag exits with code 1 on critical or high findings
@@ -30,7 +31,7 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 ## Requirements
 
 - Python 3.10+
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) with `llama-server`
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) with `llama-server` — chosen for 100% local inference with no telemetry, no API calls, and no data leaving your machine. All analysis stays on your hardware.
 - Qwen3.5-9B-Q4_K_M loaded at `127.0.0.1:8080`
 - macOS / Linux / Windows (WSL2)
 
@@ -111,7 +112,7 @@ GraphGuard is itself a LangGraph agent — a pipeline of four nodes:
 parser_node → analyzer_node → scorer_node → reporter_node
 ```
 
-- **parser_node** — walks the target directory, parses all `.py` files with Python's `ast` module
+- **parser_node** — walks the target directory, parses `.py`, `.js`, and `.ts` files using Python's `ast` module and tree-sitter respectively
 - **analyzer_node** — sends parsed AST to local LLM (Qwen3.5-9B), receives findings as structured JSON
 - **scorer_node** — validates, deduplicates, and sorts findings by severity
 - **reporter_node** — renders Rich console output and serializes the final JSON report
