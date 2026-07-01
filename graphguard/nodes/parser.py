@@ -1,32 +1,41 @@
 """
 parser.py — parser_node implementation.
 
-Walks the target path, collects Python source files, and parses them
-using the stdlib ast module to extract LangGraph-specific structures.
+Walks the target path, collects Python and JavaScript/TypeScript source files,
+and parses them using the stdlib ast module (Python) or tree-sitter (JS/TS) to
+extract LangGraph-specific structures.
 """
 
 import ast
 import os
 from graphguard.state import GraphGuardState
 
+_JS_EXTS = {".js", ".ts", ".mjs"}
+_SOURCE_EXTS = {".py"} | _JS_EXTS
 
-def collect_python_files(target_path: str) -> list[str]:
+
+def collect_source_files(target_path: str) -> list[str]:
     """
-    Recursively collect all .py files under target_path.
-    If target_path is a single file, return it directly.
+    Recursively collect all .py, .js, .ts, and .mjs files under target_path.
+    If target_path is a single file, return it directly (if it has a supported extension).
     """
 
     if os.path.isfile(target_path):
-        return [target_path] if target_path.endswith(".py") else []
+        return [target_path] if os.path.splitext(target_path)[1].lower() in _SOURCE_EXTS else []
 
-    py_files = []
+    source_files = []
     for root, dirs, files in os.walk(target_path):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
         for file in files:
-            if file.endswith(".py"):
-                py_files.append(os.path.join(root, file))
+            if os.path.splitext(file)[1].lower() in _SOURCE_EXTS:
+                source_files.append(os.path.join(root, file))
 
-    return sorted(py_files)
+    return sorted(source_files)
+
+
+# Backward-compatible alias so existing code and tests that import collect_python_files
+# continue to work without modification.
+collect_python_files = collect_source_files
 
 
 def parse_file(filepath: str) -> dict:
@@ -101,9 +110,11 @@ def parse_file(filepath: str) -> dict:
 
 def parser_node(state: GraphGuardState) -> dict:
     """
-    Node 1: walks target_path, parses all .py files, returns structured AST data.
+    Node 1: walks target_path, parses all source files, returns structured AST data.
+    Python files use the stdlib ast parser; JS/TS files use the tree-sitter parser.
     This is the entry point of the GraphGuard analysis pipeline.
     """
+    from graphguard.nodes.parser_js import parse_js_file
 
     target = state["target_path"]
 
@@ -115,13 +126,17 @@ def parser_node(state: GraphGuardState) -> dict:
             "parsed_ast":   {},
         }
 
-    source_files = collect_python_files(target)
-    print(f"[parser] found {len(source_files)} Python files in {target}")
+    source_files = collect_source_files(target)
+    print(f"[parser] found {len(source_files)} source files in {target}")
 
     parsed_ast = {}
     for filepath in source_files:
         print(f"[parser] parsing {filepath}")
-        parsed_ast[filepath] = parse_file(filepath)
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext in _JS_EXTS:
+            parsed_ast[filepath] = parse_js_file(filepath)
+        else:
+            parsed_ast[filepath] = parse_file(filepath)
 
     return {
         "source_files": source_files,

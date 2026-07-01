@@ -9,7 +9,8 @@ edge cases (missing paths, bad encodings) are handled gracefully.
 import os
 import tempfile
 import unittest
-from graphguard.nodes.parser import collect_python_files, parse_file, parser_node
+from graphguard.nodes.parser import collect_python_files, collect_source_files, parse_file, parser_node
+from graphguard.nodes.parser_js import parse_js_file
 
 
 class TestCollectPythonFiles(unittest.TestCase):
@@ -159,6 +160,109 @@ class TestParserNode(unittest.TestCase):
         self.assertIn("does not exist", result["error"])
         self.assertEqual(result["source_files"], [])
         self.assertEqual(result["parsed_ast"],   {})
+
+
+class TestJSParser(unittest.TestCase):
+    """Tests for collect_source_files and parse_js_file (JavaScript/TypeScript support)."""
+
+    _EXPECTED_KEYS = {"filepath", "functions", "classes", "imports", "calls", "assignments", "strings"}
+
+    def _write_js(self, source: str, suffix: str = ".js") -> str:
+        """Write source to a temp JS/TS file and return its path."""
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="w") as f:
+            f.write(source)
+            return f.name
+
+    # --- collect_source_files tests ---
+
+    def test_collect_source_files_finds_js(self):
+        """collect_source_files includes .js files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            js_file = os.path.join(tmpdir, "agent.js")
+            open(js_file, "w").close()
+
+            result = collect_source_files(tmpdir)
+            self.assertIn(js_file, result)
+
+    def test_collect_source_files_finds_ts(self):
+        """collect_source_files includes .ts files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ts_file = os.path.join(tmpdir, "agent.ts")
+            open(ts_file, "w").close()
+
+            result = collect_source_files(tmpdir)
+            self.assertIn(ts_file, result)
+
+    def test_collect_source_files_finds_py(self):
+        """collect_source_files still includes .py files (backward compatibility)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            py_file = os.path.join(tmpdir, "agent.py")
+            open(py_file, "w").close()
+
+            result = collect_source_files(tmpdir)
+            self.assertIn(py_file, result)
+
+    # --- parse_js_file tests ---
+
+    def test_parse_js_file_extracts_functions(self):
+        """Function declarations in .js source are extracted correctly."""
+        path = self._write_js("function myFunc(x, y) { return x + y; }\n")
+        try:
+            result = parse_js_file(path)
+            names = [f["name"] for f in result["functions"]]
+            self.assertIn("myFunc", names)
+            fn = next(f for f in result["functions"] if f["name"] == "myFunc")
+            self.assertIn("x", fn["args"])
+            self.assertIn("y", fn["args"])
+            self.assertEqual(fn["decorators"], [])
+        finally:
+            os.unlink(path)
+
+    def test_parse_js_file_extracts_classes(self):
+        """Class declarations in .js source are extracted correctly."""
+        path = self._write_js("class MyState extends BaseState { }\n")
+        try:
+            result = parse_js_file(path)
+            names = [c["name"] for c in result["classes"]]
+            self.assertIn("MyState", names)
+            cls = next(c for c in result["classes"] if c["name"] == "MyState")
+            self.assertIn("BaseState", cls["bases"])
+            self.assertIsInstance(cls["lineno"], int)
+        finally:
+            os.unlink(path)
+
+    def test_parse_js_file_extracts_imports(self):
+        """Import statements in .js source are extracted correctly."""
+        path = self._write_js(
+            'import { StateGraph } from "@langchain/langgraph";\n'
+            'import fs from "fs";\n'
+        )
+        try:
+            result = parse_js_file(path)
+            self.assertGreaterEqual(len(result["imports"]), 2)
+            combined = " ".join(result["imports"])
+            self.assertIn("@langchain/langgraph", combined)
+        finally:
+            os.unlink(path)
+
+    def test_parse_js_file_syntax_error_handled(self):
+        """Files with syntax errors return an error entry without crashing."""
+        path = self._write_js("function broken(\n")
+        try:
+            result = parse_js_file(path)
+            self.assertIn("error", result)
+            self.assertEqual(result["filepath"], path)
+        finally:
+            os.unlink(path)
+
+    def test_parse_js_file_returns_same_keys_as_python_parser(self):
+        """parse_js_file returns a dict with the exact same top-level keys as parse_file()."""
+        path = self._write_js("function hello() { return 1; }\n")
+        try:
+            result = parse_js_file(path)
+            self.assertEqual(set(result.keys()), self._EXPECTED_KEYS)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
