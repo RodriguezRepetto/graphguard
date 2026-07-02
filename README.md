@@ -32,8 +32,13 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 
 - Python 3.10+
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) with `llama-server` — chosen for 100% local inference with no telemetry, no API calls, and no data leaving your machine. All analysis stays on your hardware.
-- Qwen3.5-9B-Q4_K_M loaded at `127.0.0.1:8080`
+- **Qwen3.5-9B-Q4_K_M** loaded at `127.0.0.1:8080` — default fast model for analysis
+- **Qwen3.5-35B-A3B-UD-Q4_K_XL** loaded at `127.0.0.1:8081` *(optional)* — reasoning model for complex agents, activated with `--model reasoning`
 - macOS / Linux / Windows (WSL2)
+
+> **Note:** GraphGuard invokes a local LLM during analysis. Expect fan activity and brief CPU/thermal load while the scan runs — this is normal. The chip's thermal protection handles it automatically.
+
+> **Hardware:** Developed and tested on Apple Silicon (M5 Pro, 48GB unified memory). Runs well on any Apple Silicon chip (M1 and later) or modern CPU with 16GB+ RAM. Performance scales with available memory — more RAM means larger context and faster inference.
 
 ---
 
