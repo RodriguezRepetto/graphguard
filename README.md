@@ -20,6 +20,7 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 
 - **LLM-driven analysis** — no hardcoded rules, reasoning over your actual code
 - **Multi-language support** — analyzes Python (`.py`), JavaScript (`.js`), and TypeScript (`.ts`) LangGraph agents via tree-sitter AST parsing
+- **Smart filtering** — automatically detects LangGraph-relevant files and ignores node_modules, build artifacts, and dependencies. Point it at your entire project — GraphGuard figures out what to scan.
 - **7 OWASP ASI vectors** — prompt injection, tool misuse, state leakage, supply chain, privilege escalation, inter-node validation, memory poisoning
 - **Rich console output** — color-coded findings table with detailed remediations
 - **CI/CD ready** — `--strict` flag exits with code 1 on critical or high findings
