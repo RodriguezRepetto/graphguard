@@ -146,6 +146,37 @@ def _walk(node, result) -> None:
         _walk(child, result)
 
 
+# Text patterns that indicate a .js/.ts/.mjs file is plausibly LangGraph agent
+# code, worth spending tree-sitter parsing and LLM analysis on. Plain
+# substring checks — fast, read-only, no AST involved — since this runs
+# before parsing. "@langchain/" alone covers @langchain/langgraph,
+# @langchain/core, and any other @langchain/* package.
+_RELEVANCE_PATTERNS = (
+    "@langchain/",
+    "StateGraph", "Annotation", "MessagesAnnotation",
+    "addNode", "addEdge", "setEntryPoint", "compile(",
+    "MemorySaver", "SqliteSaver", "PostgresSaver",
+    "tool(", "DynamicTool", "StructuredTool",
+    "invoke(", "stream(",
+    "createReactAgent", "createAgent",
+)
+
+
+def is_langgraph_relevant(filepath: str) -> bool:
+    """
+    Return True if the .js/.ts/.mjs file at filepath contains at least one
+    pattern suggesting LangGraph/LangChain agent code. Unreadable files are
+    skipped silently (treated as not relevant) rather than raising.
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            source = f.read()
+    except (OSError, UnicodeDecodeError):
+        return False
+
+    return any(pattern in source for pattern in _RELEVANCE_PATTERNS)
+
+
 def parse_js_file(filepath: str) -> dict:
     """
     Parse a single .js, .ts, or .mjs file with tree-sitter.
