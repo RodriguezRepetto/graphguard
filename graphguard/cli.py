@@ -58,6 +58,25 @@ def scan(
         "--model", "-m",
         help="Model to use: fast (Qwen3.5-9B) or reasoning (Qwen3.5-35B-A3B).",
     ),
+    timeout: float = typer.Option(
+        120.0,
+        "--timeout", "-t",
+        help="Per-LLM-call timeout in seconds. Raise this on slower hardware "
+             "(e.g. M1 16GB) or when file batching produces larger prompts.",
+    ),
+    workers: int = typer.Option(
+        2,
+        "--workers", "-w",
+        help="Number of GraphGuard-side worker threads for concurrent LLM calls. "
+             "This only speeds things up if llama-server is started with "
+             "--parallel N >= this value and enough KV-cache per slot; "
+             "otherwise requests just queue up server-side with no gain. On "
+             "RAM-constrained hardware (e.g. M1 16GB), keep this low (or even 1 "
+             "for fully serial behavior) and do NOT raise llama-server's "
+             "--parallel to match — that reserves more KV-cache and can make "
+             "things slower, not faster. On hardware with headroom (e.g. M5 Pro "
+             "48GB) both sides can be raised together.",
+    ),
 ):
     """
     Scan a LangGraph agent for security vulnerabilities.
@@ -80,16 +99,20 @@ def scan(
             f"{output} will be saved as JSON.[/yellow]"
         )
 
-    # build the initial state — model is passed through to analyzer_node
+    # build the initial state — model and timeout are passed through to analyzer_node
     initial_state = {
-        "target_path":  target,
-        "source_files": [],
-        "parsed_ast":   {},
-        "findings":     [],
-        "scored":       False,
-        "report":       {},
-        "error":        None,
-        "model":        model,
+        "target_path":   target,
+        "source_files":  [],
+        "parsed_ast":    {},
+        "findings":      [],
+        "scored":        False,
+        "report":        {},
+        "error":         None,
+        "model":            model,
+        "timeout":          timeout,
+        "skipped_files":    [],
+        "workers":          workers,
+        "connection_error": None,
     }
 
     result = app_graph.invoke(initial_state)

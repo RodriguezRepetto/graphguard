@@ -46,3 +46,11 @@ class GraphGuardState(TypedDict):
     report:        dict           # final structured report produced by reporter_node
     error:         Optional[str]  # any fatal error message, None if clean run
     model:         str            # LLM model selection: "fast" or "reasoning"
+    timeout:       float          # per-LLM-call timeout in seconds, passed to call_llm()
+    skipped_files: List[dict]     # files skipped due to LLM timeout: {"filepath": str, "reason": str}
+    workers:       int            # number of GraphGuard-side worker threads for concurrent LLM calls
+    # kept separate from skipped_files rather than folded into it: a timeout skips
+    # specific files while the rest of the scan still completes normally, but a
+    # ConnectError means the whole analysis was aborted — not a per-file omission,
+    # so it doesn't fit the {"filepath", "reason"} shape skipped_files uses.
+    connection_error: Optional[str]  # set when analyzer_node aborts due to llama-server being unreachable

@@ -25,7 +25,7 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 - **Rich console output** — color-coded findings table with detailed remediations
 - **CI/CD ready** — `--strict` flag exits with code 1 on critical or high findings
 - **Supply chain check** — detects known vulnerable LangGraph/LangChain dependency versions
-- **100% local** — runs entirely offline with a local LLM via llama-server
+- **100% local** — runs entirely offline with a local LLM via llama-server  
 
 ---
 
@@ -93,6 +93,42 @@ graphguard scan ./my_agent/ --format json --output report.json
 ```bash
 graphguard scan ./my_agent/ --strict
 ```
+
+**Tune timeout and concurrency for your hardware:**
+
+```bash
+graphguard scan ./my_agent/ --timeout 240 --workers 2
+```
+
+---
+
+## Performance tuning: `--timeout` and `--workers`
+
+- `--timeout` (default `120.0`, seconds) — per-LLM-call timeout. Small file batching (files
+  are grouped into fewer, larger requests automatically) means each call can take longer than
+  before; raise this on slower hardware or if you see files reported as skipped due to timeout.
+- `--workers` (default `2`) — number of GraphGuard-side threads used to call the LLM concurrently.
+
+**These two client-side flags are not the same thing as `llama-server`'s own `--parallel N`
+flag**, and raising GraphGuard's `--workers` alone does **not** guarantee a speedup:
+
+- GraphGuard's `--workers` controls how many requests *this tool* fires off at once.
+- `llama-server`'s `--parallel N` controls how many of those requests the model can actually
+  process *simultaneously*. If `llama-server` is running with its default single slot, extra
+  workers on the GraphGuard side just queue up behind each other server-side — no time is saved,
+  only extra open connections.
+- Both sides need to be coordinated for parallel workers to pay off, and `--parallel N` on
+  `llama-server` reserves additional KV-cache per slot, which costs RAM.
+
+Guidance by hardware:
+- **RAM-constrained (e.g. M1 16GB):** keep `--workers` low (the default `2`, or `1` to force
+  fully serial behavior) and do **not** raise `llama-server --parallel` to match — the extra
+  KV-cache reservation can make things slower, not faster, on tight memory.
+- **Headroom available (e.g. M5 Pro 48GB):** both `--workers` and `llama-server --parallel N`
+  can be raised together, since there's RAM to sustain multiple KV-caches at once.
+
+No benchmark against Qwen3.5-9B backs a specific "optimal" worker count — the default is a
+conservative starting point, not a measured result. Tune it for your own setup.
 
 ---
 

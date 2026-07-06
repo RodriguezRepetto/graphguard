@@ -43,19 +43,54 @@ def build_summary(findings: list[Finding]) -> dict:
     return summary
 
 
-def render_console_output(findings: list[Finding], summary: dict) -> None:
+def render_console_output(
+    findings: list[Finding],
+    summary: dict,
+    skipped_files: list[dict] = None,
+    connection_error: str = None,
+) -> None:
     """
     Renders a Rich-formatted summary table and detailed findings to the terminal.
     Shows each finding with severity, OWASP ID, title, file, line, and remediation.
+    `skipped_files` (files dropped due to LLM timeout) and `connection_error`
+    (analysis aborted because llama-server was unreachable) are both surfaced as
+    warnings so a clean "no issues" result is never shown when the scan was
+    incomplete, whether that's a partial skip or a total abort.
     """
+    skipped_files = skipped_files or []
 
     # print GraphGuard header
     console.print("\n[bold white]GraphGuard[/bold white] — Security Audit Report", style="bold")
     console.print(f"[dim]{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}[/dim]\n")
 
+    # a ConnectError means the whole analysis was aborted, not just some files —
+    # shown first since it's the more severe of the two incomplete-scan cases
+    if connection_error:
+        console.print(
+            "[bold red]⚠ Analysis aborted — could not connect to llama-server. "
+            "Results are incomplete.[/bold red]"
+        )
+        console.print(f"  [dim]→ {connection_error}[/dim]")
+        console.print("  [dim]hint: start llama-server before running graphguard[/dim]\n")
+
+    # warn about incomplete coverage before any success/summary messaging —
+    # a timeout means the scan result below may be missing real findings
+    if skipped_files:
+        console.print(
+            f"[bold yellow]⚠ {len(skipped_files)} file(s) skipped due to timeout — "
+            f"results may be incomplete.[/bold yellow]"
+        )
+        for skipped in skipped_files:
+            console.print(f"  [dim]→ {skipped['filepath']} — {skipped['reason']}[/dim]")
+        console.print()
+
     if not findings:
-        # no findings — print a clean result
-        console.print("[bold green]✓ No security issues found.[/bold green]\n")
+        if connection_error or skipped_files:
+            # never show a clean "no issues" message when the scan didn't cover everything
+            console.print("[yellow]No security issues found in the files that were analyzed.[/yellow]\n")
+        else:
+            # no findings and nothing skipped or aborted — genuinely clean result
+            console.print("[bold green]✓ No security issues found.[/bold green]\n")
         return
 
     # build the findings summary table
@@ -124,6 +159,8 @@ def reporter_node(state: GraphGuardState) -> dict:
     """
 
     findings = state["findings"]   # scored and sorted findings from scorer_node
+    skipped_files = state.get("skipped_files", [])  # files dropped by analyzer_node due to timeout
+    connection_error = state.get("connection_error")  # set if analyzer_node aborted on ConnectError
     print(f"[reporter] building report for {len(findings)} findings")
 
     # step 1: build the summary counts
@@ -151,9 +188,11 @@ def reporter_node(state: GraphGuardState) -> dict:
         "total_findings":     len(findings),                                    # total count
         "summary":            summary,                                          # per-severity counts
         "findings":           findings_json,                                    # full findings list
+        "skipped_files":      skipped_files,                                    # files dropped due to timeout
+        "connection_error":   connection_error,                                 # set if analysis was aborted
     }
 
     # step 4: render the console output with Rich
-    render_console_output(findings, summary)
+    render_console_output(findings, summary, skipped_files, connection_error)
 
     return {"report": report}   # final state update - end of pipeline
