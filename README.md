@@ -22,6 +22,10 @@ Most LangGraph agents are built for functionality, not security. GraphGuard fill
 - **Multi-language support** — analyzes Python (`.py`), JavaScript (`.js`), and TypeScript (`.ts`) LangGraph agents via tree-sitter AST parsing
 - **Smart filtering** — automatically detects LangGraph-relevant files and ignores node_modules, build artifacts, and dependencies. Point it at your entire project — GraphGuard figures out what to scan.
 - **7 OWASP ASI vectors** — prompt injection, tool misuse, state leakage, supply chain, privilege escalation, inter-node validation, memory poisoning
+- **Batched analysis** — small files are automatically grouped into a single LLM call instead of one call per file, cutting round-trips on projects with many small modules
+- **Parallel analysis** — configurable `--workers` for concurrent LLM calls, coordinated with `llama-server`'s own `--parallel` slots (see [Performance tuning](#performance-tuning---timeout-and---workers))
+- **Configurable timeout** — `--timeout` per LLM call, useful on slower hardware or with larger batched prompts
+- **Schema-constrained output** — findings are requested via `response_format`/JSON schema when the local `llama-server` build supports it, for more reliable structured output
 - **Rich console output** — color-coded findings table with detailed remediations
 - **CI/CD ready** — `--strict` flag exits with code 1 on critical or high findings
 - **Supply chain check** — detects known vulnerable LangGraph/LangChain dependency versions
@@ -100,6 +104,22 @@ graphguard scan ./my_agent/ --strict
 graphguard scan ./my_agent/ --timeout 240 --workers 2
 ```
 
+**Tip: scan a specific path while iterating, not the whole project every time**
+
+```bash
+graphguard scan ./my_agent/nodes/analyzer.py
+graphguard scan ./my_agent/nodes/
+```
+
+If you're actively working on one file or module, point GraphGuard directly at it instead of
+scanning the entire project on every run. Each call to the LLM (or batch of calls, see
+[Performance tuning](#performance-tuning---timeout-and---workers) below) takes real time — on
+constrained hardware, a full-project scan can take several minutes, while a single file or
+directory comes back in seconds. Run the full scan (`graphguard scan .`) when you want a
+complete audit — before a commit, before a release, or once in a while to catch anything an
+incremental scan wouldn't — but for the tight loop of "change something, check it," scanning
+just the part you touched gives a much faster feedback cycle.
+
 ---
 
 ## Performance tuning: `--timeout` and `--workers`
@@ -127,8 +147,28 @@ Guidance by hardware:
 - **Headroom available (e.g. M5 Pro 48GB):** both `--workers` and `llama-server --parallel N`
   can be raised together, since there's RAM to sustain multiple KV-caches at once.
 
-No benchmark against Qwen3.5-9B backs a specific "optimal" worker count — the default is a
-conservative starting point, not a measured result. Tune it for your own setup.
+**How to actually enable parallel speedup (both sides, coordinated):**
+
+```bash
+# llama-server: --ctx-size is split across --parallel slots, so scale it up
+# to keep the same effective context per slot (here: 2 slots x 8192 = 16384)
+llama-server --model /path/to/Qwen3.5-9B-Q4_K_M.gguf \
+  --host 127.0.0.1 --port 8080 \
+  --ctx-size 16384 --parallel 2
+
+# GraphGuard: match --workers to llama-server's --parallel value
+graphguard scan ./my_agent/ --workers 2
+```
+
+Forgetting to raise `--ctx-size` when adding `--parallel N` is a common way to silently shrink
+the context available per request — each slot only gets `ctx-size / parallel` tokens, which can
+make batched prompts (see [Batching](#features) above) more likely to hit the truncation limit.
+
+Measured example (not a formal benchmark, just one real run for reference): on an Apple M5 Pro
+48GB, scanning `tests/vulnerable_agent/` (3 files, 2 LLM calls after batching) went from **83.4s**
+with `--workers 1` down to **64.0s** with `--workers 2` + `llama-server --parallel 2` — roughly a
+**23% reduction**. Your numbers will depend on file count, batch sizes, and hardware; this is a
+real data point, not a guaranteed multiplier.
 
 ---
 
@@ -155,7 +195,7 @@ parser_node → analyzer_node → scorer_node → reporter_node
 ```
 
 - **parser_node** — walks the target directory, parses `.py`, `.js`, and `.ts` files using Python's `ast` module and tree-sitter respectively
-- **analyzer_node** — sends parsed AST to local LLM (Qwen3.5-9B), receives findings as structured JSON
+- **analyzer_node** — sends parsed AST to local LLM (Qwen3.5-9B), batching small files into fewer calls and running calls across configurable worker threads; requests schema-constrained JSON output where the local `llama-server` build supports it
 - **scorer_node** — validates, deduplicates, and sorts findings by severity
 - **reporter_node** — renders Rich console output and serializes the final JSON report
 
